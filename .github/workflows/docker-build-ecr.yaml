@@ -1,0 +1,52 @@
+name: Deploy FastAPI to Private EC2
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps: 
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          # ⚠️ 주의: 시크릿에 새로 만든 FastAPI용 ECR 레포 이름을 넣으세요!
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_API }} 
+          IMAGE_TAG: "v1"
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Private EC2 via SSM
+        env:
+          IMAGE_URL: ${{ steps.build-image.outputs.image }}
+        run: |
+          aws ssm send-command \
+            --instance-ids ${{ secrets.EC2_PRIVATE_INSTANCE_ID }} \
+            --document-name "AWS-RunShellScript" \
+            --region ${{ secrets.AWS_REGION }} \
+            --parameters "commands=[
+              'aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}',
+              'sudo docker pull $IMAGE_URL',
+              'sudo docker stop fastapi-container || true',
+              'sudo docker rm fastapi-container || true',
+              'sudo docker run -d --name fastapi-container -p 8080:8080 $IMAGE_URL'
+            ]"
