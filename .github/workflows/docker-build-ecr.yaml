@@ -48,5 +48,5 @@ jobs:
               'sudo docker pull $IMAGE_URL',
               'sudo docker stop fastapi-container || true',
               'sudo docker rm fastapi-container || true',
-              'sudo docker run -d --name fastapi-container -p 8080:8080 $IMAGE_URL'
+              'sudo docker run -d --name fastapi-container -p 8000:8000 $IMAGE_URL'
             ]"
